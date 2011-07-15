@@ -1,5 +1,4 @@
-
-class SimplePlugin < Scout::Plugin
+class HealthCheck < Scout::Plugin
   needs 'net/http'
   needs  'uri'
 
@@ -22,7 +21,10 @@ class SimplePlugin < Scout::Plugin
 
   def build_report
     healthCheckUrl = "#{option(:url)}"
-    error("URL must be provided") if healthCheckUrl.empty?
+    if healthCheckUrl.empty?
+      error("URL must be provided")
+      return
+    end
 
     httpVerb = "#{option(:httpMethod)}"
     header = "#{option(:header)}"
@@ -42,7 +44,6 @@ class SimplePlugin < Scout::Plugin
       else
         isHealthy = false
     end
-    time = Time.new
-    report(:hour => time.hour, :minute => time.min, :response => response, :healty => isHealthy)
+    report(:healty => isHealthy)
   end
 end
