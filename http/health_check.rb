@@ -38,12 +38,13 @@ class HealthCheck < Scout::Plugin
       when Net::HTTPSuccess
         if header.empty?
           isHealthy = response.body.eql? expectedText
+          print response.body
         else
           isHealthy = response[header].eql? expectedText
         end
       else
         isHealthy = false
     end
-    report(:healty => isHealthy)
+    report(:isHealty => isHealthy ? 1 : 0)
   end
 end
