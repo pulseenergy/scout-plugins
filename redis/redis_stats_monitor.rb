@@ -11,7 +11,6 @@ class HealthCheck < Scout::Plugin
       name: Redis Port
       notes: The port of the Redis instance
     redis_password:
-      default: localhost:6379
       name: Redis Password
       notes: The password of the Redis instance
     redis_database:
