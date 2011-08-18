@@ -4,19 +4,19 @@ class HealthCheck < Scout::Plugin
   OPTIONS=<<-EOS
     redis_host:
       default: localhost
-      name: Host
+      name: Redis Host
       notes: The hostname of the Redis instance
     redis_port:
       default: 6379
-      name: Port
+      name: Redis Port
       notes: The port of the Redis instance
     redis_password:
       default: localhost:6379
-      name: Password
+      name: Redis Password
       notes: The password of the Redis instance
     redis_database:
       default: 0
-      name: Database
+      name: Redis Database
       notes: The database id to pass to the Redis instance
     value_key_prefix:
       name: Value Key Prefix
@@ -31,13 +31,13 @@ class HealthCheck < Scout::Plugin
   EOS
 
   def build_report
-    redis = Redis.new :port     => option(:client_port),
-                      :db       => option(:db),
-                      :password => option(:password),
-                      :host     => option(:client_host)
+    redis = Redis.new :port     => option(:redis_port),
+                      :db       => option(:redis_database),
+                      :password => option(:redis_password),
+                      :host     => option(:redis_host)
 
-    value_key_prefix = option(:value_key_prefix)
-    rate_key_prefix = option(:rate_key_prefix)
+    value_key_prefix = option(:value_key_prefix).to_s
+    rate_key_prefix = option(:rate_key_prefix).to_s
 
     value_keys = redis.keys(value_key_prefix + "*")
 
