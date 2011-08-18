@@ -20,15 +20,15 @@ class HealthCheck < Scout::Plugin
   EOS
 
   def build_report
-    healthCheckUrl = "#{option(:url)}"
+    healthCheckUrl = option(:url).to_s
     if healthCheckUrl.empty?
       error("URL must be provided")
       return
     end
 
-    httpVerb = "#{option(:httpMethod)}"
-    header = "#{option(:header)}"
-    expectedText = "#{option(:expectedText)}"
+    httpVerb = option(:httpMethod).to_s
+    header = option(:header).to_s
+    expectedText = option(:expectedText).to_s
     if httpVerb.eql? "HEAD"
       response = Net::HTTP.request_head(URI.parse(healthCheckUrl))
     else
