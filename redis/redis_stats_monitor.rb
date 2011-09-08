@@ -59,6 +59,14 @@ class RedisStatsMonitor < Scout::Plugin
     @granularity = config["rate_granularity"].to_s
   end
 
+  def check_field_count(field_count)
+    if field_count > 20
+      error("More than 20 fields reported")
+      return false
+    end
+    return true
+  end
+
   def build_report
     config_file = option(:config_file).to_s
 
@@ -69,12 +77,17 @@ class RedisStatsMonitor < Scout::Plugin
     end
 
     value_keys = @redis.keys(@value_key_prefix + "*")
+    field_count = 0
 
     value_keys.each do |key|
       value = @redis.get(key).to_i
       name = key
       name[@value_key_prefix] = ""
       report(name => value)
+      field_count += 1
+      if not check_field_count(field_count)
+        return
+      end
     end
 
     rate_keys = @redis.keys(@rate_key_prefix + "*")
@@ -83,6 +96,10 @@ class RedisStatsMonitor < Scout::Plugin
       name = key
       name[@rate_key_prefix] = ""
       counter(name, value, :per => @granularity)
+      field_count += 1
+      if not check_field_count(field_count)
+        return
+      end
     end
   end
 end

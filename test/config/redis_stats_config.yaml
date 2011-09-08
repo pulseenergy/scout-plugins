@@ -1,0 +1,11 @@
+redis:
+  host: "localhost"
+  port: 6379
+  database: 0
+  password:
+
+key_prefixes:
+  value: "pulse:pyqp:metrics:tmeighen:value:"
+  rate: "pulse:pyqp:metrics:tmeighen:counter:"
+
+rate_granularity: "minute"

@@ -1,0 +1,13 @@
+queries: {
+    records: "SELECT IF(archived, 'Archived', 'Unarchived') AS label, COUNT(*) AS total FROM POINT_RECORD GROUP BY archived",
+    records-with-max: "SELECT IF(archived, 'Archived', 'Unarchived') AS label, COUNT(*) AS total, MAX(archived) AS maximum, MIN(archived) AS minimum FROM POINT_RECORD GROUP BY archived",
+    guids: "SELECT DISTINCT point_guid FROM POINT_RECORD",
+    total: "SELECT COUNT(*) AS total FROM POINT_RECORD",
+    too-much: "SELECT *, archived as a, archived as b, archived as c, archived as d, archived as e, archived as f, archived as g, archived as h, archived as i, archived as j, archived AS total FROM POINT_RECORD LIMIT 1"
+}
+mysql:
+    host: localhost
+    port: 3306
+    database: point_service
+    user: root
+    password: sqlsecret
