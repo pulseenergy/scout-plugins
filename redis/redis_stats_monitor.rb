@@ -23,6 +23,9 @@ class RedisStatsMonitor < Scout::Plugin
     value_key_prefix:
       name: Value Key Prefix
       notes: Key prefix for Redis keys to be returned as simple values
+    lists:
+      name: Lists
+      notes: Hash of name => Redis key pairs. Each key will be monitored for list length.
     rate_key_prefix:
       name: Rate Key Prefix
       notes: Key prefix for Redis keys to be returned as rates
@@ -41,6 +44,7 @@ class RedisStatsMonitor < Scout::Plugin
 
     @value_key_prefix = option(:value_key_prefix).to_s
     @rate_key_prefix = option(:rate_key_prefix).to_s
+    @lists = YAML::parse(option(:lists).to_s)
     @granularity = option(:rate_granularity).to_s == 'second' ? :sec : :minute
   end
 
@@ -56,6 +60,7 @@ class RedisStatsMonitor < Scout::Plugin
     prefixes = config["key_prefixes"]
     @value_key_prefix = prefixes["value"].to_s
     @rate_key_prefix = prefixes["rate"].to_s
+    @lists = config["lists"]
     @granularity = config["rate_granularity"].to_s
   end
 
@@ -96,6 +101,15 @@ class RedisStatsMonitor < Scout::Plugin
       name = key
       name[@rate_key_prefix] = ""
       counter(name, value, :per => @granularity)
+      field_count += 1
+      if not check_field_count(field_count)
+        return
+      end
+    end
+
+    @lists.each do |name, redis_key|
+      value = @redis.llen(redis_key).to_i
+      report(name => value)
       field_count += 1
       if not check_field_count(field_count)
         return

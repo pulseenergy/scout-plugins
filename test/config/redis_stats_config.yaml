@@ -8,4 +8,6 @@ key_prefixes:
   value: "pulse:pyqp:metrics:tmeighen:value:"
   rate: "pulse:pyqp:metrics:tmeighen:counter:"
 
+lists: { listOne: "pulse:test:list:1",
+         listTwo: "pulse:test:list:2" }
 rate_granularity: "minute"
