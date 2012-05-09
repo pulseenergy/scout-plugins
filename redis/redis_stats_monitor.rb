@@ -23,9 +23,10 @@ class RedisStatsMonitor < Scout::Plugin
     value_key_prefix:
       name: Value Key Prefix
       notes: Key prefix for Redis keys to be returned as simple values
-    lists:
-      name: Lists
-      notes: Hash of name => Redis key pairs. Each key will be monitored for list length.
+    size_keys:
+      default: ""
+      name: Monitor Key Size
+      notes: A comma-separated list of keys to monitor the length of (works for lists, sets, zsets, hashes, and strings).
     rate_key_prefix:
       name: Rate Key Prefix
       notes: Key prefix for Redis keys to be returned as rates
@@ -44,7 +45,7 @@ class RedisStatsMonitor < Scout::Plugin
 
     @value_key_prefix = option(:value_key_prefix).to_s
     @rate_key_prefix = option(:rate_key_prefix).to_s
-    @lists = YAML::parse(option(:lists).to_s)
+    @size_keys = option(:size_keys).to_s
     @granularity = option(:rate_granularity).to_s == 'second' ? :sec : :minute
   end
 
@@ -60,7 +61,7 @@ class RedisStatsMonitor < Scout::Plugin
     prefixes = config["key_prefixes"]
     @value_key_prefix = prefixes["value"].to_s
     @rate_key_prefix = prefixes["rate"].to_s
-    @lists = config["lists"]
+    @size_keys = config["size_keys"].to_s
     @granularity = config["rate_granularity"].to_s
   end
 
@@ -81,8 +82,12 @@ class RedisStatsMonitor < Scout::Plugin
       configure_from_file(config_file)
     end
 
-    value_keys = @redis.keys(@value_key_prefix + "*")
     field_count = 0
+    
+    value_keys = []
+    if not @value_key_prefix.empty? then
+      value_keys = @redis.keys(@value_key_prefix + "*")
+    end
 
     value_keys.each do |key|
       value = @redis.get(key).to_i
@@ -95,7 +100,10 @@ class RedisStatsMonitor < Scout::Plugin
       end
     end
 
-    rate_keys = @redis.keys(@rate_key_prefix + "*")
+    rate_keys = []
+    if not @rate_key_prefix.empty? then
+        rate_keys = @redis.keys(@rate_key_prefix + "*")
+    end
     rate_keys.each do |key|
       value = @redis.get(key).to_i
       name = key
@@ -107,12 +115,20 @@ class RedisStatsMonitor < Scout::Plugin
       end
     end
 
-    @lists.each do |name, redis_key|
-      value = @redis.llen(redis_key).to_i
-      report(name => value)
-      field_count += 1
-      if not check_field_count(field_count)
-        return
+    if not @size_keys.empty? then
+      @size_keys.split(',').each do |redis_key|
+        name = redis_key
+        type = @redis.type(redis_key)
+        if type == "none" then
+          next
+        end
+        functions = Hash["list", :llen, "set", :scard, "zset", :zcard, "hash", :hlen, "string", :strlen]
+        value = @redis.send(functions[type], redis_key).to_i
+        report(name => value)
+        field_count += 1
+        if not check_field_count(field_count)
+          return
+        end
       end
     end
   end
