@@ -20,6 +20,10 @@
 #
 class JmxAgent < Scout::Plugin
   OPTIONS=<<-EOS
+    config_file:
+      name: Config File
+      notes: Configuration file on each server from which to load all other configuration values. Providing a config file value overrides any other configuration settings and can be used as an alternative to configuring the plugin in the Scout interface.
+
     jmxterm_uberjar:
       name: jmxterm uberjar File
       notes: Absolute file name of the jmxterm uberjar.
@@ -83,30 +87,64 @@ class JmxAgent < Scout::Plugin
     values
   end
 
-  def build_report
-    jvm_pid_file = option(:jvm_pid_file)
-    mbean_server_location = option(:mbean_server_url)
+  def config_from_file()
+    config = YAML::load(File.open(config_file, "r"))
 
-    if !jvm_pid_file.empty? then
-      jvm_pid = File.open(jvm_pid_file).readline.strip
-      mbean_server_location = jvm_pid
+    @jvm_pid_file = config["jvm_pid_file"]
+    @mbean_server_location = config["mbean_server_location"]
+
+    @jvm_pid, @mbean_server_location = read_jvm_pid_file()
+
+    @jmxterm_uberjar = config["jmxterm_uberjar"]
+
+    mbeans = config["mbeans"]
+
+    mbeans.each do |mbean|
+
     end
-    
-    error("No MBean server location configured: no PID file nor server URL") if mbean_server_location.empty?
-    
-    mbeans_attributes = option(:mbeans_attributes)
+  end
+
+  def read_jvm_pid_file()
+    if !@jvm_pid_file.empty? then
+      @jvm_pid = File.open(jvm_pid_file).readline.strip
+      @mbean_server_location = jvm_pid
+    end
+
+    error("No MBean server location configured: no PID file nor server URL") if @mbean_server_location.empty?
+  end
+
+  def config_from_options()
+    @jvm_pid_file = option(:jvm_pid_file)
+    @mbean_server_location = option(:mbean_server_url)
+
+    @jvm_pid, @mbean_server_location = read_jvm_pid_file()
+
+    @mbeans_attributes = option(:mbeans_attributes)
     error("No MBeans and Attributes Names defined") if mbeans_attributes.empty?
-    
-    jmx_cmd = "java -jar #{option(:jmxterm_uberjar)} -l #{mbean_server_location} -n -v silent"
+
+    @jmxterm_uberjar = option(:jmxterm_uberjar)
+  end
+
+  def build_report
+
+    config_file = option(:config_file).to_s
+
+    if config_file.empty?
+      configure_from_options()
+    else
+      configure_from_file(config_file)
+    end
+
+    jmx_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location} -n -v silent"
     
     # validate JVM connectivity
     jvm_name = read_mbean(jmx_cmd, 'java.lang:type=Runtime', 'Name')['Name']
-    error("JVM not found for PID #{jvm_pid}") unless jvm_name.start_with?(jvm_pid)
+    error("JVM not found for PID #{@jvm_pid}") unless jvm_name.start_with?(jvm_pid)
     
     report_content = {}
     
     # query configured mbeans
-    mbeans_attributes.split('|').each do |mbean_attributes|
+    @mbeans_attributes.split('|').each do |mbean_attributes|
       s = mbean_attributes.split('@')
       raise "Invalid MBean attributes configuration" unless s.size == 2
       mbean = s[1]
