@@ -1,5 +1,5 @@
 #
-# Copyright 2011 Pulse Energy Inc.
+# Copyright 2012 Pulse Energy Inc.
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@
 # Requires: Java SDK and jmxterm [http://wiki.cyclopsgroup.org/jmxterm]
 #
 class JmxAgent < Scout::Plugin
+  needs "pty", "expect"
+
   OPTIONS=<<-EOS
     config_file:
       name: Config File
@@ -52,20 +54,22 @@ class JmxAgent < Scout::Plugin
   
   def parse_attribute_line(line)
     s = line.split(/[=;]/)
+    puts("ATTRIBUTE: #{s}")
     {:name => s[0].strip, :value => to_float?(s[1].strip)}
   end
-  
-  def read_mbean(jmx_cmd, mbean, attributes)
+
+  def get_values_from_result result
     values = {}
-    
-    result = `echo get -b #{mbean} #{attributes} | #{jmx_cmd}`
-  
+
     attribute = nil
     composite = false
-    
-    result.each_line do |line|
-      next if line.strip.empty?
-      
+
+
+    puts "RESULT SIZE: #{result.size} CLASS: #{result.class}"
+    result.each_with_index do |line, i|
+      next if line.strip.empty? or i < 2 or not line.index(" = ")
+      puts "LINE: #{line}"
+
       if composite then
         if (line.strip.end_with?('};')) then
           composite = false
@@ -83,37 +87,38 @@ class JmxAgent < Scout::Plugin
         end
       end
     end
-    
+
     values
   end
 
-  def config_from_file()
+  def read_mbean(jmx_cmd, mbean, attributes)
+    result = `echo get -b #{mbean} #{attributes} | #{jmx_cmd}`
+    get_values_from_result result
+  end
+
+  def configure_from_file(config_file)
     config = YAML::load(File.open(config_file, "r"))
 
     @jvm_pid_file = config["jvm_pid_file"]
     @mbean_server_location = config["mbean_server_location"]
 
-    @jvm_pid, @mbean_server_location = read_jvm_pid_file()
+    read_jvm_pid_file()
 
     @jmxterm_uberjar = config["jmxterm_uberjar"]
 
-    mbeans = config["mbeans"]
-
-    mbeans.each do |mbean|
-
-    end
+    @mbeans = config["mbeans"]
   end
 
   def read_jvm_pid_file()
     if !@jvm_pid_file.empty? then
-      @jvm_pid = File.open(jvm_pid_file).readline.strip
-      @mbean_server_location = jvm_pid
+      @jvm_pid = File.open(@jvm_pid_file).readline.strip
+      @mbean_server_location = @jvm_pid
     end
 
     error("No MBean server location configured: no PID file nor server URL") if @mbean_server_location.empty?
   end
 
-  def config_from_options()
+  def configure_from_options()
     @jvm_pid_file = option(:jvm_pid_file)
     @mbean_server_location = option(:mbean_server_url)
 
@@ -135,12 +140,39 @@ class JmxAgent < Scout::Plugin
       configure_from_file(config_file)
     end
 
-    jmx_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location} -n -v silent"
-    
-    # validate JVM connectivity
-    jvm_name = read_mbean(jmx_cmd, 'java.lang:type=Runtime', 'Name')['Name']
-    error("JVM not found for PID #{@jvm_pid}") unless jvm_name.start_with?(jvm_pid)
-    
+    jmx_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location}"
+
+    jmx_prompt = "\$>"
+
+    puts jmx_cmd
+
+    jvm_name = ""
+
+    PTY.spawn(jmx_cmd) do |jmx_out, jmx_in, pid|
+      jmx_in.sync = true
+      jmx_out.expect(jmx_prompt)
+      jmx_in.puts "get -b java.lang:type=Runtime Name\n"
+      jmx_out.expect(jmx_prompt) do |output|
+        values = get_values_from_result output.first
+        jvm_name = values["Name"]
+        # validate JVM connectivity
+        error("JVM not found for PID #{@jvm_pid}") unless jvm_name.start_with?(@jvm_pid)
+      end
+      @mbeans.each do |mbean|
+        jmx_in.puts "get -b #{mbean['name']} #{mbean['attributes'].join(' ')}\n"
+        jmx_out.expect(jmx_prompt) do |output|
+          values = get_values_from_result output.first
+          values.each do |key, value|
+            puts "#{mbean['report_name']}.#{key} = #{value}"
+          end
+        end
+      end
+      jmx_in.puts("quit\n")
+    end
+
+    @mbeans_attributes = ""
+
+
     report_content = {}
     
     # query configured mbeans

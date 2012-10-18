@@ -1,0 +1,14 @@
+---
+jvm_pid_file: "/opt/pulse/point-service/log/point-service.pid"
+jmxterm_uberjar: "/opt/jmxterm/jmxterm-1.0-alpha-4-uber.jar"
+mbeans:
+- name: "java.lang:type=Memory"
+  report_name: "Memory"
+  attributes:
+    - "HeapMemoryUsage"
+    - "NonHeapMemoryUsage"
+- name: "java.lang:name=ParNew,type=GarbageCollector"
+  report_name: "ParNew"
+  attributes:
+    - "CollectionCount"
+    - "CollectionTime"
