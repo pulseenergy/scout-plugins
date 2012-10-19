@@ -194,6 +194,7 @@ class JmxAgent < Scout::Plugin
       jmxterm_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location}"
 
       mbean_values = read_mbean_values_from_jmxterm jmxterm_cmd
+      return if mbean_values.empty?
       mbean_values.delete_if{|key, value| @excluded_attributes.index(key)}
 
       @counter_attributes.each do |attr|
