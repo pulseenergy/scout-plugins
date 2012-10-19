@@ -100,8 +100,10 @@ class JmxAgent < Scout::Plugin
   end
 
   def read_jvm_pid_file()
-    @jvm_pid = File.open(@jvm_pid_file).readline.strip if not @jvm_pid_file.empty?
-    @mbean_server_location = @jvm_pid
+    if @jvm_pid_file and not @jvm_pid_file.empty?
+      @jvm_pid = File.open(@jvm_pid_file).readline.strip
+      @mbean_server_location = @jvm_pid
+    end
 
     error("No MBean server location configured: no PID file nor server URL") if @mbean_server_location.empty?
   end
@@ -109,8 +111,8 @@ class JmxAgent < Scout::Plugin
   def configure_from_file(config_file)
     config = YAML::load(File.open(config_file, "r"))
 
-    @jvm_pid_file = config["jvm_pid_file"].to_s
-    @mbean_server_location = config["mbean_server_location"].to_s
+    @jvm_pid_file = config["jvm_pid_file"]
+    @mbean_server_location = config["mbean_server_location"]
 
     read_jvm_pid_file()
 
@@ -124,8 +126,8 @@ class JmxAgent < Scout::Plugin
   end
 
   def configure_from_options()
-    @jvm_pid_file = option(:jvm_pid_file).to_s
-    @mbean_server_location = option(:mbean_server_url).to_s
+    @jvm_pid_file = option(:jvm_pid_file)
+    @mbean_server_location = option(:mbean_server_url)
 
     read_jvm_pid_file()
 
