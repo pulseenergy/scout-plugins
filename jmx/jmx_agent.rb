@@ -100,10 +100,8 @@ class JmxAgent < Scout::Plugin
   end
 
   def read_jvm_pid_file()
-    if !@jvm_pid_file.empty? then
-      @jvm_pid = File.open(@jvm_pid_file).readline.strip
-      @mbean_server_location = @jvm_pid
-    end
+    @jvm_pid = File.open(@jvm_pid_file).readline.strip if not @jvm_pid_file.empty?
+    @mbean_server_location = @jvm_pid
 
     error("No MBean server location configured: no PID file nor server URL") if @mbean_server_location.empty?
   end
@@ -111,8 +109,8 @@ class JmxAgent < Scout::Plugin
   def configure_from_file(config_file)
     config = YAML::load(File.open(config_file, "r"))
 
-    @jvm_pid_file = config["jvm_pid_file"]
-    @mbean_server_location = config["mbean_server_location"]
+    @jvm_pid_file = config["jvm_pid_file"].to_s
+    @mbean_server_location = config["mbean_server_location"].to_s
 
     read_jvm_pid_file()
 
@@ -120,15 +118,18 @@ class JmxAgent < Scout::Plugin
 
     @mbeans = config["mbeans"]
     @excluded_attributes = config["excluded_attributes"]
+    @counter_attributes = config["counter_attributes"]
+    @excluded_attributes ||= []
+    @counter_attributes ||= []
   end
 
   def configure_from_options()
-    @jvm_pid_file = option(:jvm_pid_file)
-    @mbean_server_location = option(:mbean_server_url)
+    @jvm_pid_file = option(:jvm_pid_file).to_s
+    @mbean_server_location = option(:mbean_server_url).to_s
 
     read_jvm_pid_file()
 
-    mbeans_attributes = option(:mbeans_attributes)
+    mbeans_attributes = option(:mbeans_attributes).to_s
     error("No MBeans and Attributes Names defined") if mbeans_attributes.empty?
 
     @jmxterm_uberjar = option(:jmxterm_uberjar)
@@ -143,8 +144,8 @@ class JmxAgent < Scout::Plugin
       mbean["attributes"] = attributes.split(",")
       @mbeans << mbean
     end
-
     @excluded_attributes = []
+    @counter_attributes = []
   end
 
   def build_report
@@ -161,46 +162,41 @@ class JmxAgent < Scout::Plugin
 
     mbean_values = {}
 
-    PTY.spawn(jmx_cmd) do |jmxterm_reader, jmxterm_writer, pid|
-      begin
-        jmxterm_writer.sync = true
-        jmxterm_reader.expect(JMXTERM_PROMPT)
-        jmxterm_writer.puts "get -b java.lang:type=Runtime Name"
-        jmxterm_reader.expect(JMXTERM_PROMPT) do |output|
-          values = get_values_from_result output.first
-          jvm_name = values["Name"]
-          # validate JVM connectivity
-          error("JVM not found for PID #{@jvm_pid}") unless jvm_name.start_with?(@jvm_pid)
-        end
-        @mbeans.each do |mbean|
-          jmxterm_writer.puts "get -b #{mbean['name']} #{mbean['attributes'].join(' ')}"
-          jmxterm_reader.expect(JMXTERM_PROMPT) do |output|
-            mbean_values.merge!(get_values_from_result output.first, mbean["report_prefix"])
+    begin
+      PTY.spawn(jmx_cmd) do |jmxterm_reader, jmxterm_writer, pid|
+        begin
+          jmxterm_writer.sync = true
+          jmxterm_reader.expect(JMXTERM_PROMPT)
+          @mbeans.each do |mbean|
+            jmxterm_writer.puts "get -b #{mbean['name']} #{mbean['attributes'].join(' ')}"
+            jmxterm_reader.expect(JMXTERM_PROMPT) do |output|
+              mbean_values.merge!(get_values_from_result output.first, mbean["report_prefix"])
+            end
           end
+          jmxterm_writer.puts("quit")
+          jmxterm_writer.flush
+          jmxterm_reader.expect("#bye")
+        rescue Exception => e
+          error("Unable to connect to JVM at #{@mbean_server_location} using jmxterm: \n#{e.backtrace}")
+          return
+        ensure
+          jmxterm_reader.close
+          jmxterm_writer.close
         end
-        jmxterm_writer.puts("quit")
-        jmxterm_writer.flush
-        jmxterm_reader.expect("#bye")
-      rescue Exception => e
-        puts e
-      ensure
-        jmxterm_reader.close
-        jmxterm_writer.close
-        `kill -9 #{pid}`
-        #exists = `kill -0 #{pid}`
-        #puts exists
-        #puts "Waiting for PID #{pid}"
-        #begin
-        #  Process.wait(-pid)
-        #rescue Exception => e
-        #  puts "EXCEPTION ON WAIT: #{e}"
-        #end
       end
+    rescue PTY::ChildExited
     end
 
-    mbean_values.delete_if{|key, value| @excluded_attributes.index(key)} if @excluded_attributes
+    mbean_values.delete_if{|key, value| @excluded_attributes.index(key)}
 
-    puts "Reporting..."
+    @counter_attributes.each do |attr|
+      key = attr["key"]
+      value = mbean_values[key]
+      granularity = attr["granularity"]
+      counter(key, value, :per => granularity)
+      mbean_values.delete(key)
+    end
+
     report(mbean_values)
   end
 end

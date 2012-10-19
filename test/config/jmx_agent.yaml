@@ -11,6 +11,11 @@ mbeans:
   attributes:
     - "CollectionCount"
     - "CollectionTime"
+counter_attributes:
+- key: "ParNew.CollectionCount"
+  granularity: "minute"
+- key: "ParNew.CollectionTime"
+  granularity: "minute"
 excluded_attributes:
 - "HeapMemoryUsage.init"
 - "NonHeapMemoryUsage.init"
