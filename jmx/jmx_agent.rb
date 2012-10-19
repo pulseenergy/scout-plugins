@@ -201,6 +201,7 @@ class JmxAgent < Scout::Plugin
         key = attr["key"]
         value = mbean_values[key]
         granularity = attr["granularity"]
+        error ("Unable to find value for key #{key}") if not value
         counter(key, value, :per => granularity)
         mbean_values.delete(key)
       end
