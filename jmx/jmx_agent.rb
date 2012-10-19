@@ -150,22 +150,11 @@ class JmxAgent < Scout::Plugin
     @counter_attributes = []
   end
 
-  def build_report
-
-    config_file = option(:config_file).to_s
-
-    if config_file.empty?
-      configure_from_options()
-    else
-      configure_from_file(config_file)
-    end
-
-    jmx_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location}"
-
+  def read_mbean_values_from_jmxterm(jmxterm_cmd)
     mbean_values = {}
 
     begin
-      PTY.spawn(jmx_cmd) do |jmxterm_reader, jmxterm_writer, pid|
+      PTY.spawn(jmxterm_cmd) do |jmxterm_reader, jmxterm_writer, pid|
         begin
           jmxterm_writer.sync = true
           jmxterm_reader.expect(JMXTERM_PROMPT)
@@ -180,7 +169,6 @@ class JmxAgent < Scout::Plugin
           jmxterm_reader.expect("#bye")
         rescue Exception => e
           error("Unable to connect to JVM at #{@mbean_server_location} using jmxterm: \n#{e.backtrace}")
-          return
         ensure
           jmxterm_reader.close
           jmxterm_writer.close
@@ -189,17 +177,37 @@ class JmxAgent < Scout::Plugin
     rescue PTY::ChildExited
     end
 
-    mbean_values.delete_if{|key, value| @excluded_attributes.index(key)}
+    mbean_values
+  end
 
-    @counter_attributes.each do |attr|
-      key = attr["key"]
-      value = mbean_values[key]
-      granularity = attr["granularity"]
-      counter(key, value, :per => granularity)
-      mbean_values.delete(key)
+
+  def build_report
+    begin
+      config_file = option(:config_file).to_s
+
+      if config_file.empty?
+        configure_from_options()
+      else
+        configure_from_file(config_file)
+      end
+
+      jmxterm_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location}"
+
+      mbean_values = read_mbean_values_from_jmxterm jmxterm_cmd
+      mbean_values.delete_if{|key, value| @excluded_attributes.index(key)}
+
+      @counter_attributes.each do |attr|
+        key = attr["key"]
+        value = mbean_values[key]
+        granularity = attr["granularity"]
+        counter(key, value, :per => granularity)
+        mbean_values.delete(key)
+      end
+
+      report(mbean_values)
+    rescue Exception => e
+      error("Unexpected exception: #{e}\n#{e.backtrace}")
     end
-
-    report(mbean_values)
   end
 end
 
