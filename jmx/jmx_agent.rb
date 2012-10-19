@@ -45,7 +45,9 @@ class JmxAgent < Scout::Plugin
       notes: A pipe-delimited list of comma separated attribute names @ MBean name.
       For example: HeapMemoryUsage,NonHeapMemoryUsage@java.lang:type=Memory|Name@java.lang:type=Runtime
   EOS
-  
+
+  JMXTERM_PROMPT = "\$>"
+
   def to_float?(value)
     Float(value)
   rescue
@@ -54,28 +56,27 @@ class JmxAgent < Scout::Plugin
   
   def parse_attribute_line(line)
     s = line.split(/[=;]/)
-    puts("ATTRIBUTE: #{s}")
     {:name => s[0].strip, :value => to_float?(s[1].strip)}
   end
 
-  def get_values_from_result result
+  def get_values_from_result(result, name_prefix=nil)
     values = {}
 
     attribute = nil
     composite = false
 
 
-    puts "RESULT SIZE: #{result.size} CLASS: #{result.class}"
     result.each_with_index do |line, i|
-      next if line.strip.empty? or i < 2 or not line.index(" = ")
-      puts "LINE: #{line}"
+      next if line.strip.empty? or i < 2 or line.index("#mbean = ") or line.index(JMXTERM_PROMPT)
 
       if composite then
         if (line.strip.end_with?('};')) then
           composite = false
         else
           p = parse_attribute_line(line)
-          values["#{attribute}.#{p[:name]}"] = p[:value]
+          key = "#{attribute}.#{p[:name]}"
+          key = "#{name_prefix}.#{key}" if name_prefix
+          values[key] = p[:value]
         end
       else
         p = parse_attribute_line(line)
@@ -83,7 +84,9 @@ class JmxAgent < Scout::Plugin
         if (p[:value]  == '{') then
           composite = true
         else
-          values[attribute] = p[:value]
+          key = attribute
+          key = "#{name_prefix}.#{key}" if name_prefix
+          values[key] = p[:value]
         end
       end
     end
@@ -93,7 +96,16 @@ class JmxAgent < Scout::Plugin
 
   def read_mbean(jmx_cmd, mbean, attributes)
     result = `echo get -b #{mbean} #{attributes} | #{jmx_cmd}`
-    get_values_from_result result
+    get_values_from_result result, ""
+  end
+
+  def read_jvm_pid_file()
+    if !@jvm_pid_file.empty? then
+      @jvm_pid = File.open(@jvm_pid_file).readline.strip
+      @mbean_server_location = @jvm_pid
+    end
+
+    error("No MBean server location configured: no PID file nor server URL") if @mbean_server_location.empty?
   end
 
   def configure_from_file(config_file)
@@ -107,27 +119,32 @@ class JmxAgent < Scout::Plugin
     @jmxterm_uberjar = config["jmxterm_uberjar"]
 
     @mbeans = config["mbeans"]
-  end
-
-  def read_jvm_pid_file()
-    if !@jvm_pid_file.empty? then
-      @jvm_pid = File.open(@jvm_pid_file).readline.strip
-      @mbean_server_location = @jvm_pid
-    end
-
-    error("No MBean server location configured: no PID file nor server URL") if @mbean_server_location.empty?
+    @excluded_attributes = config["excluded_attributes"]
   end
 
   def configure_from_options()
     @jvm_pid_file = option(:jvm_pid_file)
     @mbean_server_location = option(:mbean_server_url)
 
-    @jvm_pid, @mbean_server_location = read_jvm_pid_file()
+    read_jvm_pid_file()
 
-    @mbeans_attributes = option(:mbeans_attributes)
+    mbeans_attributes = option(:mbeans_attributes)
     error("No MBeans and Attributes Names defined") if mbeans_attributes.empty?
 
     @jmxterm_uberjar = option(:jmxterm_uberjar)
+    @mbeans = []
+
+    mbeans_attributes.split("|").each do |mbean_spec|
+      elements = mbean_spec.split("@")
+      attributes = elements[0]
+      mbean_name = elements[1]
+      mbean = {}
+      mbean["name"] = mbean_name
+      mbean["attributes"] = attributes.split(",")
+      @mbeans << mbean
+    end
+
+    @excluded_attributes = []
   end
 
   def build_report
@@ -142,49 +159,49 @@ class JmxAgent < Scout::Plugin
 
     jmx_cmd = "java -jar #{@jmxterm_uberjar} -l #{@mbean_server_location}"
 
-    jmx_prompt = "\$>"
+    mbean_values = {}
 
-    puts jmx_cmd
-
-    jvm_name = ""
-
-    PTY.spawn(jmx_cmd) do |jmx_out, jmx_in, pid|
-      jmx_in.sync = true
-      jmx_out.expect(jmx_prompt)
-      jmx_in.puts "get -b java.lang:type=Runtime Name\n"
-      jmx_out.expect(jmx_prompt) do |output|
-        values = get_values_from_result output.first
-        jvm_name = values["Name"]
-        # validate JVM connectivity
-        error("JVM not found for PID #{@jvm_pid}") unless jvm_name.start_with?(@jvm_pid)
-      end
-      @mbeans.each do |mbean|
-        jmx_in.puts "get -b #{mbean['name']} #{mbean['attributes'].join(' ')}\n"
-        jmx_out.expect(jmx_prompt) do |output|
+    PTY.spawn(jmx_cmd) do |jmxterm_reader, jmxterm_writer, pid|
+      begin
+        jmxterm_writer.sync = true
+        jmxterm_reader.expect(JMXTERM_PROMPT)
+        jmxterm_writer.puts "get -b java.lang:type=Runtime Name"
+        jmxterm_reader.expect(JMXTERM_PROMPT) do |output|
           values = get_values_from_result output.first
-          values.each do |key, value|
-            puts "#{mbean['report_name']}.#{key} = #{value}"
+          jvm_name = values["Name"]
+          # validate JVM connectivity
+          error("JVM not found for PID #{@jvm_pid}") unless jvm_name.start_with?(@jvm_pid)
+        end
+        @mbeans.each do |mbean|
+          jmxterm_writer.puts "get -b #{mbean['name']} #{mbean['attributes'].join(' ')}"
+          jmxterm_reader.expect(JMXTERM_PROMPT) do |output|
+            mbean_values.merge!(get_values_from_result output.first, mbean["report_prefix"])
           end
         end
+        jmxterm_writer.puts("quit")
+        jmxterm_writer.flush
+        jmxterm_reader.expect("#bye")
+      rescue Exception => e
+        puts e
+      ensure
+        jmxterm_reader.close
+        jmxterm_writer.close
+        `kill -9 #{pid}`
+        #exists = `kill -0 #{pid}`
+        #puts exists
+        #puts "Waiting for PID #{pid}"
+        #begin
+        #  Process.wait(-pid)
+        #rescue Exception => e
+        #  puts "EXCEPTION ON WAIT: #{e}"
+        #end
       end
-      jmx_in.puts("quit\n")
     end
 
-    @mbeans_attributes = ""
+    mbean_values.delete_if{|key, value| @excluded_attributes.index(key)} if @excluded_attributes
 
-
-    report_content = {}
-    
-    # query configured mbeans
-    @mbeans_attributes.split('|').each do |mbean_attributes|
-      s = mbean_attributes.split('@')
-      raise "Invalid MBean attributes configuration" unless s.size == 2
-      mbean = s[1]
-      attributes = s[0].gsub(',', ' ')
-      report_content.merge!(read_mbean(jmx_cmd, mbean, attributes))
-    end
-
-    report(report_content)
+    puts "Reporting..."
+    report(mbean_values)
   end
 end
 
