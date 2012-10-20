@@ -164,12 +164,14 @@ class JmxAgent < Scout::Plugin
               mbean_values.merge!(get_values_from_result output.first, mbean["report_prefix"])
             end
           end
-          jmxterm_writer.puts("quit")
-          jmxterm_writer.flush
-          jmxterm_reader.expect("#bye")
         rescue Exception => e
           error("Unable to connect to JVM at #{@mbean_server_location} using jmxterm: \n#{e.backtrace}")
         ensure
+          begin
+            jmxterm_writer.puts("quit")
+            jmxterm_writer.flush
+          rescue
+          end
           jmxterm_reader.close
           jmxterm_writer.close
         end
@@ -201,7 +203,7 @@ class JmxAgent < Scout::Plugin
         key = attr["key"]
         value = mbean_values[key]
         granularity = attr["granularity"]
-        error ("Unable to find value for key #{key}") if not value
+        error("Unable to find value for key #{key}") if not value
         counter(key, value, :per => granularity)
         mbean_values.delete(key)
       end
