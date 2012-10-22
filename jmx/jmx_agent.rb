@@ -121,8 +121,10 @@ class JmxAgent < Scout::Plugin
     @mbeans = config["mbeans"]
     @excluded_attributes = config["excluded_attributes"]
     @counter_attributes = config["counter_attributes"]
+    @timeout_secs = config["timeout_secs"]
     @excluded_attributes ||= []
     @counter_attributes ||= []
+    @timeout_secs ||= 30
   end
 
   def configure_from_options()
@@ -148,6 +150,7 @@ class JmxAgent < Scout::Plugin
     end
     @excluded_attributes = []
     @counter_attributes = []
+    @timeout_secs = 30
   end
 
   def read_mbean_values_from_jmxterm(jmxterm_cmd)
@@ -157,26 +160,25 @@ class JmxAgent < Scout::Plugin
       PTY.spawn(jmxterm_cmd) do |jmxterm_reader, jmxterm_writer, pid|
         begin
           jmxterm_writer.sync = true
-          jmxterm_reader.expect(JMXTERM_PROMPT)
+          jmxterm_reader.expect(JMXTERM_PROMPT, @timeout_secs)
           @mbeans.each do |mbean|
             jmxterm_writer.puts "get -b #{mbean['name']} #{mbean['attributes'].join(' ')}"
-            jmxterm_reader.expect(JMXTERM_PROMPT) do |output|
+            jmxterm_reader.expect(JMXTERM_PROMPT, @timeout_secs) do |output|
               mbean_values.merge!(get_values_from_result output.first, mbean["report_prefix"])
             end
           end
-        rescue Exception => e
+          jmxterm_writer.puts("quit")
+          jmxterm_writer.flush
+        rescue => e
           error("Unable to connect to JVM at #{@mbean_server_location} using jmxterm: \n#{e.backtrace}")
+          system("kill -9 #{pid}")
         ensure
-          begin
-            jmxterm_writer.puts("quit")
-            jmxterm_writer.flush
-          rescue
-          end
           jmxterm_reader.close
           jmxterm_writer.close
         end
       end
-    rescue PTY::ChildExited
+    rescue PTY::ChildExited => eChild
+      puts "JMXTerm exited with status #{eChild.status.exitstatus}"
     end
 
     mbean_values

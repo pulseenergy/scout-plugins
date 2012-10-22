@@ -1,6 +1,7 @@
 ---
 jvm_pid_file: "/tmp/test.pid"
 jmxterm_uberjar: "/opt/jmxterm/jmxterm-1.0-alpha-4-uber.jar"
+timeout_secs: 45
 mbeans:
 - name: "java.lang:type=Memory"
   attributes:
